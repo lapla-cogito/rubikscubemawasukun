@@ -45,6 +45,7 @@ int vec_push(vector *vec, int data) {
     return 0;
   }
   memcpy(vec->data + (vec->size++ * vec->data_size), &data, vec->data_size);
+  ((int *)vec->data)[(vec->size)-1]=data;
   return 1;
 }
 

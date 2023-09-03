@@ -42,6 +42,7 @@ MODULE_LICENSE("GPL");
 struct _mydevice_file_data {
   State *sample_cube;
   vector *rotates;
+  char res[1024];
 };
 
 State *InitCube(void) {
@@ -54,7 +55,6 @@ State *InitCube(void) {
   newcube->co = vec_new_from_arr(co, 8);
   newcube->ep = vec_new_from_arr(ep, 12);
   newcube->eo = vec_new_from_arr(eo, 12);
-
   return newcube;
 }
 
@@ -66,12 +66,119 @@ int mydevice_open(struct inode *inode, struct file *file) {
   }
   p->sample_cube = InitCube();  // kmalloc 5
   p->rotates = vec_new(0);      // kmalloc 6
+  
+  int seek = 0;  // 何文字読み込んだかを見る
+  int data;
+  int i;
+
+  // cp
+  p->res[seek++] = 'c';
+  p->res[seek++] = 'p';
+  p->res[seek++] = ':';
+  p->res[seek++] = ' ';
+  p->res[seek++] = '[';
+  for (i = 0; i < p->sample_cube->cp->size; ++i) {
+    data = ((int *)p->sample_cube->cp->data)[i];
+    if (data >= 10) {
+      p->res[seek++] = '0' + data / 10;
+      p->res[seek++] = '0' + data % 10;
+    } else {
+      p->res[seek++] = '0' + data;
+    }
+    p->res[seek++] = ',';
+    p->res[seek++] = ' ';
+  }
+  if (seek > 0) {
+    seek -= 2;  // 最後の ", " を削除
+  }
+  p->res[seek++] = ']';
+  p->res[seek++] = '\n';
+  // cp
+
+  // co
+  p->res[seek++] = 'c';
+  p->res[seek++] = 'o';
+  p->res[seek++] = ':';
+  p->res[seek++] = ' ';
+  p->res[seek++] = '[';
+  for (i = 0; i < p->sample_cube->co->size; ++i) {
+    data = ((int *)p->sample_cube->co->data)[i];
+    if (data >= 10) {
+      p->res[seek++] = '0' + data / 10;
+      p->res[seek++] = '0' + data % 10;
+    } else {
+      p->res[seek++] = '0' + data;
+    }
+    p->res[seek++] = ',';
+    p->res[seek++] = ' ';
+  }
+  if (seek > 0) {
+    seek -= 2;  // 最後の ", " を削除
+  }
+  p->res[seek++] = ']';
+  p->res[seek++] = '\n';
+  // co
+
+  // ep
+  p->res[seek++] = 'e';
+  p->res[seek++] = 'p';
+  p->res[seek++] = ':';
+  p->res[seek++] = ' ';
+  p->res[seek++] = '[';
+  for (i = 0; i < p->sample_cube->ep->size; ++i) {
+    data = ((int *)p->sample_cube->ep->data)[i];
+    if (data >= 10) {
+      p->res[seek++] = '0' + data / 10;
+      p->res[seek++] = '0' + data % 10;
+    } else {
+      p->res[seek++] = '0' + data;
+    }
+    p->res[seek++] = ',';
+    p->res[seek++] = ' ';
+  }
+  if (seek > 0) {
+    seek -= 2;  // 最後の ", " を削除
+  }
+  p->res[seek++] = ']';
+  p->res[seek++] = '\n';
+  // ep
+
+  // eo
+  p->res[seek++] = 'e';
+  p->res[seek++] = 'o';
+  p->res[seek++] = ':';
+  p->res[seek++] = ' ';
+  p->res[seek++] = '[';
+
+  for (i = 0; i < p->sample_cube->eo->size; ++i) {
+    data = ((int *)p->sample_cube->eo->data)[i];
+    if (data >= 10) {
+      p->res[seek++] = '0' + data / 10;
+      p->res[seek++] = '0' + data % 10;
+    } else {
+      p->res[seek++] = '0' + data;
+    }
+    p->res[seek++] = ',';
+    p->res[seek++] = ' ';
+  }
+  if (seek > 0) {
+    seek -= 2;  // 最後の ", " を削除
+  }
+
+  p->res[seek++] = ']';
+  p->res[seek++] = '\n';
+  // eo
+
+  p->res[seek] = '\0';  // NULL terminate
+  
   file->private_data = (void *)p;
   return 0;
 }
 
 int mydevice_close(struct inode *inode, struct file *file) {
   if (file->private_data) {
+    kfree(((struct _mydevice_file_data *)file->private_data)->sample_cube);
+    kfree(((struct _mydevice_file_data *)file->private_data)->rotates);
     kfree(file->private_data);
   }
   return 0;
@@ -79,12 +186,62 @@ int mydevice_close(struct inode *inode, struct file *file) {
 
 static ssize_t mydevice_read(struct file *filp, char __user *buf, size_t count,
                              loff_t *f_pos) {
+  if (count >= strlen(((struct _mydevice_file_data *)filp->private_data)->res)-*f_pos) {
+    count = strlen(((struct _mydevice_file_data *)filp->private_data)->res)-*f_pos;
+  }
+  
+  if (copy_to_user(buf, ((struct _mydevice_file_data *)filp->private_data)->res+*f_pos,
+                   count)) {
+    return -EFAULT;
+  }
+
+  printk("f_pos: %llu\n", *f_pos);
+  printk("count: %ld\n", count);
+  *f_pos += count;
+  return count;
+}
+
+State *apply_move(State *cube, State *move, char *res) {
   int i;
   int data;
-  State *current_state =
-      ((struct _mydevice_file_data *)filp->private_data)->sample_cube;
-  char *res = xmalloc(sizeof(char) * 1024, GFP_KERNEL);
-  int seek = 0;  // 何文字読み込んだかを見る
+  int seek;
+  vector *new_cp = vec_new(0);  // kmalloc 8
+  for (i = 0; i < (move->cp->size); ++i) {
+    vec_push(new_cp, ((int *)cube->cp)[((int *)move->cp->data)[i]]);
+  }
+
+  vector *new_co = vec_new(0);  // kmalloc 9
+  for (i = 0; i < (move->co->size); ++i) {
+    vec_push(new_co, (((int *)cube->co->data)[((int *)move->cp->data)[i]] +
+                      ((int *)move->co->data)[i]) %
+                         3);
+  }
+
+  vector *new_ep = vec_new(0);  // kmalloc 10
+  for (i = 0; i < (move->ep->size); ++i) {
+    vec_push(new_cp, ((int *)cube->ep)[((int *)move->ep->data)[i]]);
+  }
+
+  vector *new_eo = vec_new(0);  // kmalloc 11
+  for (i = 0; i < (move->eo->size); ++i) {
+    vec_push(new_eo, (((int *)cube->eo->data)[((int *)move->ep->data)[i]] +
+                      ((int *)move->eo->data)[i]) %
+                         2);
+  }
+
+  for (i = 0; i < (move->cp->size); ++i) {
+    ((int *)cube->cp->data)[i] = ((int *)move->cp->data)[i];
+  }
+  for (i = 0; i < (move->co->size); ++i) {
+    ((int *)cube->co->data)[i] = ((int *)move->co->data)[i];
+  }
+  for (i = 0; i < (move->ep->size); ++i) {
+    ((int *)cube->ep->data)[i] = ((int *)move->ep->data)[i];
+  }
+  for (i = 0; i < (move->eo->size); ++i) {
+    ((int *)cube->eo->data)[i] = ((int *)move->eo->data)[i];
+  }
+  seek = 0;  // 何文字読み込んだかを見る
 
   // cp
   res[seek++] = 'c';
@@ -92,8 +249,8 @@ static ssize_t mydevice_read(struct file *filp, char __user *buf, size_t count,
   res[seek++] = ':';
   res[seek++] = ' ';
   res[seek++] = '[';
-  for (i = 0; i < current_state->cp->size; ++i) {
-    data = ((int *)current_state->cp->data)[i];
+  for (i = 0; i < cube->cp->size; ++i) {
+    data = ((int *)cube->cp->data)[i];
     if (data >= 10) {
       res[seek++] = '0' + data / 10;
       res[seek++] = '0' + data % 10;
@@ -116,8 +273,8 @@ static ssize_t mydevice_read(struct file *filp, char __user *buf, size_t count,
   res[seek++] = ':';
   res[seek++] = ' ';
   res[seek++] = '[';
-  for (i = 0; i < current_state->co->size; ++i) {
-    data = ((int *)current_state->co->data)[i];
+  for (i = 0; i < cube->co->size; ++i) {
+    data = ((int *)cube->co->data)[i];
     if (data >= 10) {
       res[seek++] = '0' + data / 10;
       res[seek++] = '0' + data % 10;
@@ -140,8 +297,8 @@ static ssize_t mydevice_read(struct file *filp, char __user *buf, size_t count,
   res[seek++] = ':';
   res[seek++] = ' ';
   res[seek++] = '[';
-  for (i = 0; i < current_state->ep->size; ++i) {
-    data = ((int *)current_state->ep->data)[i];
+  for (i = 0; i < cube->ep->size; ++i) {
+    data = ((int *)cube->ep->data)[i];
     if (data >= 10) {
       res[seek++] = '0' + data / 10;
       res[seek++] = '0' + data % 10;
@@ -165,8 +322,8 @@ static ssize_t mydevice_read(struct file *filp, char __user *buf, size_t count,
   res[seek++] = ' ';
   res[seek++] = '[';
 
-  for (i = 0; i < current_state->eo->size; ++i) {
-    data = ((int *)current_state->eo->data)[i];
+  for (i = 0; i < cube->eo->size; ++i) {
+    data = ((int *)cube->eo->data)[i];
     if (data >= 10) {
       res[seek++] = '0' + data / 10;
       res[seek++] = '0' + data % 10;
@@ -185,55 +342,7 @@ static ssize_t mydevice_read(struct file *filp, char __user *buf, size_t count,
   // eo
 
   res[seek] = '\0';  // NULL terminate
-
-  if (copy_to_user(buf, res, seek)) {
-    return -EFAULT;
-  }
-
-  count = seek;
-  *f_pos += count;
-  kfree(res);
-  return 0;
-}
-
-State *apply_move(State *cube, State *move) {
-  vector *new_cp = vec_new(0);  // kmalloc 8
-  for (int i = 0; i < (move->cp->size); ++i) {
-    vec_push(new_cp, ((int *)cube->cp)[((int *)move->cp->data)[i]]);
-  }
-
-  vector *new_co = vec_new(0);  // kmalloc 9
-  for (int i = 0; i < (move->co->size); ++i) {
-    vec_push(new_co, (((int *)cube->co->data)[((int *)move->cp->data)[i]] +
-                      ((int *)move->co->data)[i]) %
-                         3);
-  }
-
-  vector *new_ep = vec_new(0);  // kmalloc 10
-  for (int i = 0; i < (move->ep->size); ++i) {
-    vec_push(new_cp, ((int *)cube->ep)[((int *)move->ep->data)[i]]);
-  }
-
-  vector *new_eo = vec_new(0);  // kmalloc 11
-  for (int i = 0; i < (move->eo->size); ++i) {
-    vec_push(new_eo, (((int *)cube->eo->data)[((int *)move->ep->data)[i]] +
-                      ((int *)move->eo->data)[i]) %
-                         2);
-  }
-
-  for (int i = 0; i < (move->cp->size); ++i) {
-   ((int *)cube->cp->data)[i]=((int *)move->cp->data)[i];
-  }
-  for (int i = 0; i < (move->co->size); ++i) {
-   ((int *)cube->co->data)[i]=((int *)move->co->data)[i];
-  }
-  for (int i = 0; i < (move->ep->size); ++i) {
-   ((int *)cube->ep->data)[i]=((int *)move->ep->data)[i];
-  }
-  for (int i = 0; i < (move->eo->size); ++i) {
-   ((int *)cube->eo->data)[i]=((int *)move->eo->data)[i];
-  }
-
+// printk("moveseek: %d\n", seek);
   kfree(new_cp);
   kfree(new_co);
   kfree(new_ep);
@@ -317,168 +426,184 @@ static ssize_t mydevice_write(struct file *filp, const char __user *buf,
   State *sample_cube =
       ((struct _mydevice_file_data *)filp->private_data)->sample_cube;
   vector *rotates = ((struct _mydevice_file_data *)filp->private_data)->rotates;
-
+  char *res= ((struct _mydevice_file_data *)filp->private_data)->res;
   switch (index_num) {
     case 0:
-      sample_cube = apply_move(sample_cube, dict_get("R"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("R"),res);
       vec_push(rotates, index_num);
       break;
     case 1:
-      sample_cube = apply_move(sample_cube, dict_get("RP"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("RP"),res);
       vec_push(rotates, index_num);
       break;
     case 2:
-      sample_cube = apply_move(sample_cube, dict_get("R2"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("R2"),res);
       vec_push(rotates, index_num);
       break;
     case 3:
-      sample_cube = apply_move(sample_cube, dict_get("L"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("L"),res);
       vec_push(rotates, index_num);
       break;
     case 4:
-      sample_cube = apply_move(sample_cube, dict_get("LP"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("LP"),res);
       vec_push(rotates, index_num);
       break;
     case 5:
-      sample_cube = apply_move(sample_cube, dict_get("L2"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("L2"),res);
       vec_push(rotates, index_num);
       break;
     case 6:
-      sample_cube = apply_move(sample_cube, dict_get("U"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("U"),res);
       vec_push(rotates, index_num);
       break;
     case 7:
-      sample_cube = apply_move(sample_cube, dict_get("UP"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("UP"),res);
       vec_push(rotates, index_num);
       break;
     case 8:
-      sample_cube = apply_move(sample_cube, dict_get("U2"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("U2"),res);
       vec_push(rotates, index_num);
       break;
     case 9:
-      sample_cube = apply_move(sample_cube, dict_get("D"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("D"),res);
       vec_push(rotates, index_num);
       break;
     case 10:
-      sample_cube = apply_move(sample_cube, dict_get("DP"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("DP"),res);
       vec_push(rotates, index_num);
       break;
     case 11:
-      sample_cube = apply_move(sample_cube, dict_get("D2"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("D2"),res);
       vec_push(rotates, index_num);
       break;
     case 12:
-      sample_cube = apply_move(sample_cube, dict_get("F"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("F"),res);
       vec_push(rotates, index_num);
       break;
     case 13:
-      sample_cube = apply_move(sample_cube, dict_get("FP"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("FP"),res);
       vec_push(rotates, index_num);
       break;
     case 14:
-      sample_cube = apply_move(sample_cube, dict_get("F2"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("F2"),res);
       vec_push(rotates, index_num);
       break;
     case 15:
-      sample_cube = apply_move(sample_cube, dict_get("B"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("B"),res);
       vec_push(rotates, index_num);
       break;
     case 16:
-      sample_cube = apply_move(sample_cube, dict_get("BP"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("BP"),res);
       vec_push(rotates, index_num);
       break;
     case 17:
-      sample_cube = apply_move(sample_cube, dict_get("B2"));
+      sample_cube =
+          apply_move(sample_cube, dict_get("B2"),res);
       vec_push(rotates, index_num);
-      break;
-    default:
       break;
   }
   kfree(kbuf);
   return 0;
 }
 
-State *rotate_by_ind(State *state, unsigned int arg, vector *rotates) {
+State *rotate_by_ind(State *state, unsigned int arg, vector *rotates,
+                     char *res) {
   switch (arg) {
     case 0:
-      state = apply_move(state, dict_get("R"));
+      state = apply_move(state, dict_get("R"), res);
       vec_push(rotates, arg);
       break;
     case 1:
-      state = apply_move(state, dict_get("RP"));
+      state = apply_move(state, dict_get("RP"), res);
       vec_push(rotates, arg);
       break;
     case 2:
-      state = apply_move(state, dict_get("R2"));
+      state = apply_move(state, dict_get("R2"), res);
       vec_push(rotates, arg);
       break;
     case 3:
-      state = apply_move(state, dict_get("L"));
+      state = apply_move(state, dict_get("L"), res);
       vec_push(rotates, arg);
       break;
     case 4:
-      state = apply_move(state, dict_get("LP"));
+      state = apply_move(state, dict_get("LP"), res);
       vec_push(rotates, arg);
       break;
     case 5:
-      state = apply_move(state, dict_get("L2"));
+      state = apply_move(state, dict_get("L2"), res);
       vec_push(rotates, arg);
       break;
     case 6:
-      state = apply_move(state, dict_get("U"));
+      state = apply_move(state, dict_get("U"), res);
       vec_push(rotates, arg);
       break;
     case 7:
-      state = apply_move(state, dict_get("UP"));
+      state = apply_move(state, dict_get("UP"), res);
       vec_push(rotates, arg);
       break;
     case 8:
-      state = apply_move(state, dict_get("U2"));
+      state = apply_move(state, dict_get("U2"), res);
       vec_push(rotates, arg);
       break;
     case 9:
-      state = apply_move(state, dict_get("D"));
+      state = apply_move(state, dict_get("D"), res);
       vec_push(rotates, arg);
       break;
     case 10:
-      state = apply_move(state, dict_get("DP"));
+      state = apply_move(state, dict_get("DP"), res);
       vec_push(rotates, arg);
       break;
     case 11:
-      state = apply_move(state, dict_get("D2"));
+      state = apply_move(state, dict_get("D2"), res);
       vec_push(rotates, arg);
       break;
     case 12:
-      state = apply_move(state, dict_get("F"));
+      state = apply_move(state, dict_get("F"), res);
       vec_push(rotates, arg);
       break;
     case 13:
-      state = apply_move(state, dict_get("FP"));
+      state = apply_move(state, dict_get("FP"), res);
       vec_push(rotates, arg);
       break;
     case 14:
-      state = apply_move(state, dict_get("F2"));
+      state = apply_move(state, dict_get("F2"), res);
       vec_push(rotates, arg);
       break;
     case 15:
-      state = apply_move(state, dict_get("B"));
+      state = apply_move(state, dict_get("B"), res);
       vec_push(rotates, arg);
       break;
     case 16:
-      state = apply_move(state, dict_get("BP"));
+      state = apply_move(state, dict_get("BP"), res);
       vec_push(rotates, arg);
       break;
     case 17:
-      state = apply_move(state, dict_get("B2"));
+      state = apply_move(state, dict_get("B2"), res);
       vec_push(rotates, arg);
-      break;
-    default:
       break;
   }
   return state;
 }
 
-State *get_old_rubik(State *state, unsigned int arg, vector *rotates) {
+State *get_old_rubik(State *state, unsigned int arg, vector *rotates,
+                     char *res) {
   int i;
   int vec_get_num;
   State *return_state = New(State);  // kmalloc 14
@@ -490,72 +615,70 @@ State *get_old_rubik(State *state, unsigned int arg, vector *rotates) {
     vec_get_num = ((int *)rotates->data)[(rotates->size) - i - 1];
     switch (vec_get_num) {
       case 0:
-        return_state = apply_move(return_state, dict_get("RP"));
+        return_state = apply_move(return_state, dict_get("RP"), res);
         break;
       case 1:
-        return_state = apply_move(return_state, dict_get("R"));
+        return_state = apply_move(return_state, dict_get("R"), res);
         break;
       case 2:
-        return_state = apply_move(return_state, dict_get("R2"));
+        return_state = apply_move(return_state, dict_get("R2"), res);
         break;
       case 3:
-        return_state = apply_move(return_state, dict_get("LP"));
+        return_state = apply_move(return_state, dict_get("LP"), res);
         break;
       case 4:
-        return_state = apply_move(return_state, dict_get("L"));
+        return_state = apply_move(return_state, dict_get("L"), res);
         break;
       case 5:
-        return_state = apply_move(return_state, dict_get("L2"));
+        return_state = apply_move(return_state, dict_get("L2"), res);
         break;
       case 6:
-        return_state = apply_move(return_state, dict_get("UP"));
+        return_state = apply_move(return_state, dict_get("UP"), res);
         break;
       case 7:
-        return_state = apply_move(return_state, dict_get("U"));
+        return_state = apply_move(return_state, dict_get("U"), res);
         break;
       case 8:
-        return_state = apply_move(return_state, dict_get("U2"));
+        return_state = apply_move(return_state, dict_get("U2"), res);
         break;
       case 9:
-        return_state = apply_move(return_state, dict_get("DP"));
+        return_state = apply_move(return_state, dict_get("DP"), res);
         break;
       case 10:
-        return_state = apply_move(return_state, dict_get("D"));
+        return_state = apply_move(return_state, dict_get("D"), res);
         break;
       case 11:
-        return_state = apply_move(return_state, dict_get("D2"));
+        return_state = apply_move(return_state, dict_get("D2"), res);
         break;
       case 12:
-        return_state = apply_move(return_state, dict_get("FP"));
+        return_state = apply_move(return_state, dict_get("FP"), res);
         break;
       case 13:
-        return_state = apply_move(return_state, dict_get("F"));
+        return_state = apply_move(return_state, dict_get("F"), res);
         break;
       case 14:
-        return_state = apply_move(return_state, dict_get("F2"));
+        return_state = apply_move(return_state, dict_get("F2"), res);
         break;
       case 15:
-        return_state = apply_move(return_state, dict_get("BP"));
+        return_state = apply_move(return_state, dict_get("BP"), res);
         break;
       case 16:
-        return_state = apply_move(return_state, dict_get("B"));
+        return_state = apply_move(return_state, dict_get("B"), res);
         break;
       case 17:
-        return_state = apply_move(return_state, dict_get("B2"));
-        break;
-      default:
+        return_state = apply_move(return_state, dict_get("B2"), res);
         break;
     }
   }
   return return_state;
 }
 
-State *rand_rotate(State *state, unsigned int arg, vector *rotates) {
+State *rand_rotate(State *state, unsigned int arg, vector *rotates, char *res) {
   int i;
   unsigned int rand_num;
   for (i = 0; i < arg; ++i) {
     rand_num = get_random_u32() % 18;
-    state = rotate_by_ind(state, rand_num, rotates);
+    state = rotate_by_ind(state, rand_num, rotates, res);
   }
   return state;
 }
@@ -566,7 +689,8 @@ long int mydevice_ioctl(struct file *filp, unsigned int cmd,
     case ROTATE_BY_INDEX:
       State *ind_state = rotate_by_ind(
           ((struct _mydevice_file_data *)filp->private_data)->sample_cube, arg,
-          ((struct _mydevice_file_data *)filp->private_data)->rotates);
+          ((struct _mydevice_file_data *)filp->private_data)->rotates,
+          ((struct _mydevice_file_data *)filp->private_data)->res);
       printk(KERN_INFO "%s\n", vec_to_str(ind_state->cp));
       printk(KERN_INFO "%s\n", vec_to_str(ind_state->co));
       printk(KERN_INFO "%s\n", vec_to_str(ind_state->ep));
@@ -575,7 +699,8 @@ long int mydevice_ioctl(struct file *filp, unsigned int cmd,
     case GET_OLD_STATE:
       State *old_state = get_old_rubik(
           ((struct _mydevice_file_data *)filp->private_data)->sample_cube, arg,
-          ((struct _mydevice_file_data *)filp->private_data)->rotates);
+          ((struct _mydevice_file_data *)filp->private_data)->rotates,
+          ((struct _mydevice_file_data *)filp->private_data)->res);
       printk(KERN_INFO "%s\n", vec_to_str(old_state->cp));
       printk(KERN_INFO "%s\n", vec_to_str(old_state->co));
       printk(KERN_INFO "%s\n", vec_to_str(old_state->ep));
@@ -591,7 +716,8 @@ long int mydevice_ioctl(struct file *filp, unsigned int cmd,
     case ROTATE_RANDOM:
       State *rand_state = rand_rotate(
           ((struct _mydevice_file_data *)filp->private_data)->sample_cube, arg,
-          ((struct _mydevice_file_data *)filp->private_data)->rotates);
+          ((struct _mydevice_file_data *)filp->private_data)->rotates,
+          ((struct _mydevice_file_data *)filp->private_data)->res);
       printk(KERN_INFO "%s\n", vec_to_str(rand_state->cp));
       printk(KERN_INFO "%s\n", vec_to_str(rand_state->co));
       printk(KERN_INFO "%s\n", vec_to_str(rand_state->ep));

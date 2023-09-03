@@ -7,6 +7,6 @@ all:
 clean:
 	rm -f *.o *.ko *.mod *.mod.c Module.symvers modules.order
 rwtest:
-	gcc testre.c -o rw
+	gcc testrw.c -o rw
 ioctl:
 	gcc testioctl.c -o ioctl

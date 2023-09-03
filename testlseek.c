@@ -5,19 +5,18 @@
 #include <unistd.h>
 
 int main(void) {
-  char buff[1024];
+  char c1, c2;
   int fd0_A;
 
   if ((fd0_A = open("/dev/rubikcubemawasukun", O_RDWR)) < 0) perror("open");
 
-  if (read(fd0_A, buff, 1000) != 0) perror("read");
-  printf("%s\n", buff);
+  //if (read(fd0_A, &c1, 1) != 0) perror("read");
+  //printf("%c\n", c1);
+  //lseek(fd0_A, 0, SEEK_SET);
+  //if (read(fd0_A, &c2, 1) != 0) perror("read");
+  //printf("%c\n", c2);
 
-  lseek(fd0_A, 0, SEEK_SET);
-  if (write(fd0_A, "U", 2) != 0) perror("write");
-  if (read(fd0_A, buff, 1000) != 0) perror("read");
-  printf("%s\n", buff);
-
+while(read(fd0_A, &c1,1)!=0){printf("%c",c1);}
   if (close(fd0_A) != 0) perror("close");
 
   return 0;
